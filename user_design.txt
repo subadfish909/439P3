@@ -1,0 +1,349 @@
+                     +--------------------------+
+                     |           CS 439         |
+                     | PROJECT 2: USER PROGRAMS |
+                     |      DESIGN DOCUMENT     |
+                     +--------------------------+
+
+****EACH student submits a (unique) design document.****
+
+---- Name ----
+
+>> Fill your name, UT EID, CS login, email address, and unique number:
+
+Name:Brittany Weinert
+EID: baw2565
+CS login: bweinert
+Email: bweinert@utexas.edu
+Unique Number:53785
+
+
+Slip days used on this project: 2
+
+---- GROUP ----
+
+>> Fill the names, UT EIDs, CS logins, email addresses, and unique numbers
+>> of your group members.  Also fill in each person's ranking on the 
+>> partner evaluation scale, as determined by you.
+
+Name1: Nathan Giles
+EID1: ng6978
+CS login: ng6978
+Email:	nathanrgiles@gmail.com
+Unique Number:	53785
+Ranking (scale below): Excellent
+
+
+---- PARTNER EVALUATION SCALE ----
+
+>> Excellent: Consistently went above and beyond - tutored others, carried
+>> more than his/her fair share of the load.
+
+>> Very Good: Consistently did what he/she was supposed to do, very well
+>> prepared and cooperative.
+
+>> Satisfactory: Usually did what he/she was supposed to do, minimally
+>> prepared and cooperative.
+
+>> Marginal: Sometimes failed to show up, rarely prepared.
+
+>> Deficient: Often failed to show up, rarely prepared.
+
+>> Unsatisfactory: Consistently failed to show up, unprepared.
+
+>> Superficial: Practically no participation.
+
+>> No Show: No participation at all.
+
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+	For the argument passing segment, we did not really make any changes 
+except for changing the name of one argument from "filename" to "cmdline".
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+
+	After adding the arguments to the array, we make another temp pointer and 
+leave myesp pointing to the last argument added, since the arguments were added in
+"backwards" order, we had myesp traverse back up the stack and added the address 
+of the beginning of each argument to where the temp pointer was. This ensured that
+the argument address would be in the right order.  Other temp pointers are used
+to minimize the amount of backtracking. 
+	The overflowing of the stack page is checked at a different point via 
+the variable magic contained within every thread.
+
+
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+	
+	For safety reasons. strtok() "uses global data, so it is unsafe 
+in threaded programs such as kernels".  It is much wiser to impliment
+string methods catered to pintos to ensure we have complete control 
+over how the system operates.
+
+>> A4: In Pintos, the kernel separates commands into a executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+
+	One might be that it's faster since less work is given to the kernel.
+Another advantage might be encapsulation and grouping similar functions
+together.  I.e. the command line is handled by the shell at some point, 
+so the shell should handle what work is associated with the string.
+
+			     SYSTEM CALLS
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+struct thread
+  {
+  	...
+  	 /* link to file */
+    struct file * executable_file;
+
+    /* Holds file descriptors for open files. */
+    struct file * files[130];
+
+    /* Fast way to keep track of the file numbers */
+    int num_open_files;
+
+    /* Pointer to this thread's parent, for process_wait(). Initialized by sys_exec(). */
+    struct thread * parent;
+
+    /* Pointer to thread we are waiting on. */
+    struct thread * thread_waiting_on;
+
+    /* Our exit status, for sys_exit. */
+    int exit_status;
+
+     /* Semaphore used for process_wait() to make parents sleep until child terminates */
+    struct semaphore exit_sema;
+
+    /* Semaphore used when exitting, so that the thread will wait for the parent to reap it's status. */
+    struct semaphore reap_sema;
+
+    /* Semaphore used so that parent will wait until child is completely setup before continuing. */
+    struct semaphore parent_sema;
+    ...
+   }
+
+  Many extra semaphores and pointers were made to struct thread. The executable_file points to it's 
+  executable and allows_write() to the executable before the process terminates. The files[] array and
+  num_open_files are used in any file manipulation to keep track of the files open for each thread.
+  The parent, thread_waiting_on, exit_sema, reap_sema, and parent_sema are all used for process_wait, exec,
+  and exit system calls.  Exit_status is particularly used if the child fails it's load. Then the exit status
+  is checked by the parent waiting on the child to finish loading.
+
+/* Lock used for reading and writing from files. */
+static struct lock read_write_lock;
+(In syscall.c)
+
+/* Lock used to ensure mutual exclusion on the ready list. */
+static struct lock ready_list_lock;
+(in thread.c)
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+
+	File descriptors are unique to each thread/process. Each file opened
+by a process is assigned a number from 2 to 129 and the files[] array 
+will save a pointer at the index associated with the number assigned
+to it.
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+
+In read, if fd == 0, a different course of action is taken and the output
+is read from the console. Same with write, if fd == 1. Otherwise both methods
+look for the file pointer corresponding to fd on the files[] array. If it is 
+found then the file_read and file_write methods are called. There is also
+a lock that is grabbed before entering the methods and released upon
+exiting the methods, which is done in the switch statement.
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+
+It is checked 4 times by the kernel per call to write or read. The least
+number of times is 4, at most 16384 if only one byte is copied at a time. 
+If done by 2 byte increments, the kernel checks 8192 times. There could be a 
+signifigant room in imporvement if there was some way to mark a page or file
+as safe, and if so then the kernel would not check after that. Then the kernel
+would only check once. 
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+
+There are two main semaphores used in the process_wait system call and our
+implimentation checks multiple "places" for the child. The first is the ready
+list, after that the reap_sema semaphore is checked which is where a zombie process
+could be found. Finally, if the child is not a zombie and is not on the ready_list,
+the process checks the all_list. It was done in this order to try and save on time.
+Whether or not it actually saves time is questionable. If a child is found, the parent
+then checks to make sure the thread has it as its parent (only a parent can wait on a 
+child). If the thread is the parent of the child, it goes to sleep by sema down-ing the
+child's exit_sema. In the syscall exit, the child will sema_up his exit_sema and sema downs
+his reap_sema, putting himself to sleep. The parent in process_wait is woken up by the exit_sema.  
+The parent then grabs the exit status of the child and sema ups the child's reap_sema so 
+the child may continue to kill itself and call thread_exit(). If no child is found or
+the thread cannot wait on the child, the process returns from the function with a -1.
+
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+
+The file pointer is checked at the end of each system call, and it is 
+then terminated if it violated any rules. We do a minor amount of pointer
+checking. We check each argument and the original pointer going into the function call.
+The lock is acquired and released outside of the handler for the system call. 
+If the thread does not make it out of the system call and causes a page fault,
+the page_fault function in exception.c calls release_locks(), which is a function shared via
+syscall.h that checks to see if the current thread is holding the read_write_lock:
+the only lock that currently has the chance of not being released by a dying thread.
+If the thread had any bad arguments, the process would exit using the system call exit,
+which would free the read_write_lock and close all of the thread's files. If it accessed memory
+it shouldn't while reading or writing, it would get a page fault and the read_write_lock
+would be released as well as all of it's files closed. Pages are freed by thread_exit() being
+called.
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+
+Each thread has an exit_status variable. If the child fails its load, the 
+exit_status is set to -1. The parent waits for the child by sema down-ing
+the child's parent_sema. The child will sema up this semaphore after he exits
+load and sets his exit status. 
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+"How do you ensure proper synchronization and avoid race conditions when P
+calls wait(C) before C exits?"
+The parent is put to sleep by sema down-ing the child's exit_sema. The child 
+will sema up exit_sema before he makes himself sleep so the parent may retrieve
+the exit status.
+
+"After C exits?"
+The child will sema up his exit_sema and sema down his reap_sema. The reap_sema
+will put him to sleep and essentially turns him into a zombie waiting to be reaped.
+
+"How do you ensure that all resources are freed in each case?"
+All processes exit via the syscall, within the syscall all files are closed
+and locks are freed. And thread_exit() is called at the end which will free
+all pages.
+
+"How about when P terminates without waiting, before C exits?"
+Then C will be a zombie child, and will sleep forever. However he closes 
+his files and frees his lock before he sleeps.
+(was told this was supposed to happen)
+
+"After C exits?"
+Essentially the same thing. C cannot fully exit and becomes a zombie
+as long as the parent does not reap him(process_wait him).
+
+"Are there any special cases?"
+There is one that we encountered in which C waits on his child
+and then P waits on C, but C wouldn't show up in any semaphore or
+the ready list. At this point we just check the all_list for him.
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+
+It seemed like the simplest solution to just check to make sure
+we didn't go above PHYS_BASE and didn't access anything not part of the 
+stack. It make it easy to check for validity and made the 
+scope of what we had to keep track of limited to the program's stack.
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+
+the advantages are that it's quick to accesss (indexing into an array
+using fd) and easy to keep track of, as well as keeping each file
+number unique to each individual process. The disadvantages are that the 
+array takes up quite a bit of space in the thread. And much of it may
+remain unused. Another disadvantage is that there is a fixed number 
+of files any process can open. Finally the last, but small, disadvantage is
+that we have two wasted spots in the files[] array because there cannot 
+be a file with fd == 1 or fd == 0.
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+
+We did not change it much. We count them as equal to each other.
+
+
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future semesters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the semester.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future semesters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future semesters or the remaining projects?
+
+>> Any other comments?
